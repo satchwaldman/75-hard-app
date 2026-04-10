@@ -1,1 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>75 Hard Tracker</title>
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="75 Hard">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body { overscroll-behavior-y: none; }
+        .pwa-install-prompt { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
 
+        const App = () => {
+            const [data, setData] = useState(() => {
+                const saved = localStorage.getItem('75hard_data');
+                return saved ? JSON.parse(saved) : { attempts: [], activeAttemptId: null };
+            });
+
+            useEffect(() => {
+                localStorage.setItem('75hard_data', JSON.stringify(data));
+            }, [data]);
+
+            const activeAttempt = useMemo(() => data.attempts.find(a => a.id === data.activeAttemptId), [data]);
+            
+            const startNewAttempt = () => {
+                const newAttempt = {
+                    id: Date.now(),
+                    attemptNumber: data.attempts.length + 1,
+                    startDate: new Date().toISOString().split('T')[0],
+                    endDate: null,
+                    status: 'active',
+                    logs: {} 
+                };
+                setData(prev => ({
+                    ...prev,
+                    attempts: [...prev.attempts, newAttempt],
+                    activeAttemptId: newAttempt.id
+                }));
+            };
+
+            return (
+                <div className="max-w-md mx-auto p-4 pb-20">
+                    <h1 className="text-xl font-bold mb-4">75 Hard Tracker</h1>
+                    {!activeAttempt ? (
+                        <div className="bg-white p-6 rounded-2xl shadow-sm">
+                            <button onClick={startNewAttempt} className="w-full bg-blue-600 text-white p-4 rounded-xl font-semibold">Start New Attempt</button>
+                        </div>
+                    ) : (
+                        <div className="bg-white p-6 rounded-2xl shadow-sm">
+                            <div className="flex justify-between items-center mb-4">
+                                <span className="font-bold text-gray-700">Attempt #{activeAttempt.attemptNumber}</span>
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Active</span>
+                            </div>
+                            <p className="text-4xl font-bold mb-1">{Math.floor((new Date() - new Date(activeAttempt.startDate)) / (1000 * 60 * 60 * 24)) + 1} <span className="text-sm font-normal text-gray-500">Day</span></p>
+                            <p className="text-gray-400 text-sm">Started {activeAttempt.startDate}</p>
+                        </div>
+                    )}
+                    <div className="mt-8 text-center text-gray-400 text-xs">
+                        <p>Install via "Add to Home Screen" to use offline.</p>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+        // Service Worker for offline PWA capability
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('data:text/javascript,self.addEventListener("fetch", (e)=>{e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});').catch(console.error);
+        }
+    </script>
+</body>
+</html>
