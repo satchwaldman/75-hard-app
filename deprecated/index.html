@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>75 Hard Tracker</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="75 Hard">
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            overscroll-behavior-y: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        input, button, textarea, select {
+            font: inherit;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const STORAGE_KEY = '75hard_data_v2';
+
+        const TASKS = [
+            { id: 'water', title: '1 gallon water', kind: 'number', unit: 'gal', target: 1, step: 0.1, category: '75 Hard' },
+            { id: 'noCheatMeals', title: 'No cheat meals', kind: 'boolean', category: '75 Hard' },
+            { id: 'noAlcohol', title: 'No alcohol', kind: 'boolean', category: '75 Hard' },
+            { id: 'workoutsCompleted', title: '2 workouts completed', kind: 'number', unit: 'workouts', target: 2, step: 1, category: '75 Hard' },
+            { id: 'oneOutsideWorkout', title: 'At least one workout outside', kind: 'boolean', category: '75 Hard' },
+            { id: 'workoutsNotBackToBack', title: 'Workouts were not back-to-back', kind: 'boolean', category: '75 Hard' },
+            { id: 'pagesRead', title: '10 pages of self-help read', kind: 'number', unit: 'pages', target: 10, step: 1, category: '75 Hard', helper: 'Audiobook does not count' },
+            { id: 'progressPic', title: 'Daily progress pic', kind: 'boolean', category: '75 Hard' },
+            { id: 'noMasturbation', title: 'No masturbation', kind: 'boolean', category: 'Additional' },
+            { id: 'noMarijuana', title: 'No marijuana', kind: 'boolean', category: 'Additional' },
+            { id: 'friendCallMinutes', title: 'Call a friend', kind: 'number', unit: 'min', target: 15, step: 1, category: 'Additional' },
+            { id: 'dadCallMinutes', title: 'Call dad', kind: 'number', unit: 'min', target: 5, step: 1, category: 'Additional' },
+            { id: 'musicPracticeMinutes', title: 'Practice music', kind: 'number', unit: 'min', target: 30, step: 5, category: 'Additional', helper: 'Scales / transcription' },
+            { id: 'languagePracticeMinutes', title: 'Mandarin or Spanish', kind: 'number', unit: 'min', target: 15, step: 5, category: 'Additional' },
+            { id: 'coldShowerMinutes', title: 'Cold shower at end', kind: 'number', unit: 'min', target: 2, step: 1, category: 'Additional' },
+            { id: 'workHours', title: 'Work', kind: 'number', unit: 'hours', target: 'dynamicWork', step: 0.25, category: 'Additional' },
+        ];
+
+        function todayString() {
+            const now = new Date();
+            const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+            return local.toISOString().slice(0, 10);
+        }
+
+        function isWeekend(dateStr) {
+            const d = new Date(dateStr + 'T12:00:00');
+            const day = d.getDay();
+            return day === 0 || day === 6;
+        }
+
+        function workTargetForDate(dateStr) {
+            return isWeekend(dateStr) ? 3 : 8;
+        }
+
+        function makeBlankTaskState() {
+            const values = {};
+            TASKS.forEach(task => {
+                values[task.id] = task.kind === 'boolean' ? false : '';
+            });
+            return values;
+        }
+
+        function defaultData() {
+            return {
+                attempts: [],
+                activeAttemptId: null,
+                selectedDate: todayString(),
+            };
+        }
+
+        function loadData() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (!saved) return defaultData();
+                const parsed = JSON.parse(saved);
+                return {
+                    ...defaultData(),
+                    ...parsed,
+                    attempts: Array.isArray(parsed.attempts) ? parsed.attempts : [],
+                    selectedDate: parsed.selectedDate || todayString(),
+                };
+            } catch (err) {
+                return defaultData();
+            }
+        }
+
+        function getAttemptById(data, id) {
+            return data.attempts.find(a => a.id === id) || null;
+        }
+
+        function getOrCreateLogObject(attempt, dateStr) {
+            return attempt.logs?.[dateStr] || {
+                date: dateStr,
+                tasks: makeBlankTaskState(),
+                notes: '',
+                completed: false,
+                failed: false,
+            };
+        }
+
+        function getTaskTarget(task, dateStr) {
+            if (task.target === 'dynamicWork') return workTargetForDate(dateStr);
+            return task.target;
+        }
+
+        function normalizeNumericValue(value) {
+            if (value === '') return '';
+            const num = Number(value);
+            return Number.isFinite(num) ? num : '';
+        }
+
+        function isTaskComplete(task, value, dateStr) {
+            if (task.kind === 'boolean') return value === true;
+            if (value === '' || value === null || value === undefined) return false;
+            return Number(value) >= Number(getTaskTarget(task, dateStr));
+        }
+
+        function isLogComplete(log, dateStr) {
+            return TASKS.every(task => isTaskComplete(task, log.tasks[task.id], dateStr));
+        }
+
+        function completedDaysCount(attempt) {
+            return Object.values(attempt.logs || {}).filter(log => log.completed).length;
+        }
+
+        function currentDayNumber(attempt) {
+            return Math.min(completedDaysCount(attempt) + 1, 75);
+        }
+
+        function finalDayReached(attempt) {
+            return Math.min(completedDaysCount(attempt), 75);
+        }
+
+        function ensureActiveLog(data) {
+            if (!data.activeAttemptId) return data;
+            const activeAttempt = getAttemptById(data, data.activeAttemptId);
+            if (!activeAttempt) return data;
+            const dateStr = data.selectedDate || todayString();
+            if (activeAttempt.logs && activeAttempt.logs[dateStr]) return data;
+
+            return {
+                ...data,
+                attempts: data.attempts.map(attempt => {
+                    if (attempt.id !== data.activeAttemptId) return attempt;
+                    return {
+                        ...attempt,
+                        logs: {
+                            ...(attempt.logs || {}),
+                            [dateStr]: {
+                                date: dateStr,
+                                tasks: makeBlankTaskState(),
+                                notes: '',
+                                completed: false,
+                                failed: false,
+                            },
+                        },
+                    };
+                }),
+            };
+        }
+
+        function StatusBadge({ status }) {
+            const map = {
+                active: 'bg-green-100 text-green-700',
+                failed: 'bg-red-100 text-red-700',
+                completed: 'bg-blue-100 text-blue-700',
+            };
+            return <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${map[status] || 'bg-gray-100 text-gray-700'}`}>{status}</span>;
+        }
+
+        function SectionCard({ title, subtitle, children, right }) {
+            return (
+                <div className="bg-white rounded-2xl shadow-sm p-4">
+                    <div className="flex items-start justify-between gap-3 mb-4">
+                        <div>
+                            <h2 className="text-lg font-semibold">{title}</h2>
+                            {subtitle ? <p className="text-sm text-gray-500 mt-1">{subtitle}</p> : null}
+                        </div>
+                        {right}
+                    </div>
+                    {children}
+                </div>
+            );
+        }
+
+        function TaskRow({ task, value, dateStr, onChange }) {
+            const target = getTaskTarget(task, dateStr);
+            const complete = isTaskComplete(task, value, dateStr);
+
+            return (
+                <div className="border border-gray-100 rounded-2xl p-3 bg-gray-50">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <div className="font-medium text-sm">{task.title}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                                {task.kind === 'boolean' ? 'Required today' : `Target: ${target} ${task.unit}`}
+                                {task.helper ? ` · ${task.helper}` : ''}
+                            </div>
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded-full ${complete ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>
+                            {complete ? 'Done' : 'Open'}
+                        </span>
+                    </div>
+
+                    <div className="mt-3">
+                        {task.kind === 'boolean' ? (
+                            <button
+                                onClick={() => onChange(!value)}
+                                className={`w-full rounded-xl px-4 py-3 text-sm font-medium border ${value ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
+                            >
+                                {value ? 'Marked complete' : 'Tap to mark complete'}
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    step={task.step || 1}
+                                    min="0"
+                                    value={value}
+                                    onChange={(e) => onChange(normalizeNumericValue(e.target.value))}
+                                    className="w-full rounded-xl border border-gray-300 px-3 py-3 bg-white"
+                                />
+                                <div className="text-sm text-gray-500 min-w-fit">{task.unit}</div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const App = () => {
+            const [data, setData] = useState(() => ensureActiveLog(loadData()));
+            const [view, setView] = useState('dashboard');
+
+            useEffect(() => {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            }, [data]);
+
+            const activeAttempt = useMemo(() => getAttemptById(data, data.activeAttemptId), [data]);
+            const selectedDate = data.selectedDate || todayString();
+            const selectedLog = useMemo(() => {
+                if (!activeAttempt) return null;
+                return getOrCreateLogObject(activeAttempt, selectedDate);
+            }, [activeAttempt, selectedDate]);
+
+            const selectedDayComplete = selectedLog ? isLogComplete(selectedLog, selectedDate) : false;
+            const activeAttemptCompletedDays = activeAttempt ? completedDaysCount(activeAttempt) : 0;
+            const progressPercent = selectedLog
+                ? Math.round((TASKS.filter(task => isTaskComplete(task, selectedLog.tasks[task.id], selectedDate)).length / TASKS.length) * 100)
+                : 0;
+
+            const setSelectedDate = (dateStr) => {
+                setData(prev => ensureActiveLog({ ...prev, selectedDate: dateStr }));
+            };
+
+            const startNewAttempt = () => {
+                const newAttempt = {
+                    id: Date.now(),
+                    attemptNumber: data.attempts.length + 1,
+                    startDate: todayString(),
+                    endDate: null,
+                    status: 'active',
+                    logs: {
+                        [todayString()]: {
+                            date: todayString(),
+                            tasks: makeBlankTaskState(),
+                            notes: '',
+                            completed: false,
+                            failed: false,
+                        }
+                    }
+                };
+
+                setData(prev => ({
+                    ...prev,
+                    attempts: [...prev.attempts, newAttempt],
+                    activeAttemptId: newAttempt.id,
+                    selectedDate: todayString(),
+                }));
+                setView('dashboard');
+            };
+
+            const updateTask = (taskId, value) => {
+                if (!activeAttempt) return;
+                setData(prev => ({
+                    ...prev,
+                    attempts: prev.attempts.map(attempt => {
+                        if (attempt.id !== prev.activeAttemptId) return attempt;
+                        const existingLog = getOrCreateLogObject(attempt, prev.selectedDate);
+                        const updatedLog = {
+                            ...existingLog,
+                            tasks: {
+                                ...existingLog.tasks,
+                                [taskId]: value,
+                            },
+                        };
+                        updatedLog.completed = isLogComplete(updatedLog, prev.selectedDate);
+                        return {
+                            ...attempt,
+                            logs: {
+                                ...(attempt.logs || {}),
+                                [prev.selectedDate]: updatedLog,
+                            },
+                        };
+                    }),
+                }));
+            };
+
+            const updateNotes = (notes) => {
+                if (!activeAttempt) return;
+                setData(prev => ({
+                    ...prev,
+                    attempts: prev.attempts.map(attempt => {
+                        if (attempt.id !== prev.activeAttemptId) return attempt;
+                        const existingLog = getOrCreateLogObject(attempt, prev.selectedDate);
+                        return {
+                            ...attempt,
+                            logs: {
+                                ...(attempt.logs || {}),
+                                [prev.selectedDate]: {
+                                    ...existingLog,
+                                    notes,
+                                    completed: isLogComplete(existingLog, prev.selectedDate),
+                                },
+                            },
+                        };
+                    }),
+                }));
+            };
+
+            const completeSelectedDay = () => {
+                if (!activeAttempt || !selectedLog) return;
+                if (!selectedDayComplete) {
+                    alert('Finish all tasks before completing the day.');
+                    return;
+                }
+
+                setData(prev => {
+                    const updatedAttempts = prev.attempts.map(attempt => {
+                        if (attempt.id !== prev.activeAttemptId) return attempt;
+                        const existingLog = getOrCreateLogObject(attempt, prev.selectedDate);
+                        const updatedLog = {
+                            ...existingLog,
+                            completed: true,
+                            failed: false,
+                        };
+                        const updatedAttempt = {
+                            ...attempt,
+                            logs: {
+                                ...(attempt.logs || {}),
+                                [prev.selectedDate]: updatedLog,
+                            },
+                        };
+
+                        const doneCount = completedDaysCount(updatedAttempt);
+                        if (doneCount >= 75) {
+                            updatedAttempt.status = 'completed';
+                            updatedAttempt.endDate = prev.selectedDate;
+                        }
+                        return updatedAttempt;
+                    });
+
+                    const active = updatedAttempts.find(a => a.id === prev.activeAttemptId);
+                    const nextDate = new Date(prev.selectedDate + 'T12:00:00');
+                    nextDate.setDate(nextDate.getDate() + 1);
+                    const nextDateStr = nextDate.toISOString().slice(0, 10);
+
+                    let nextState = {
+                        ...prev,
+                        attempts: updatedAttempts,
+                        activeAttemptId: active && active.status === 'completed' ? null : prev.activeAttemptId,
+                        selectedDate: active && active.status === 'completed' ? prev.selectedDate : nextDateStr,
+                    };
+
+                    return ensureActiveLog(nextState);
+                });
+            };
+
+            const failAndReset = () => {
+                if (!activeAttempt) return;
+                const confirmed = window.confirm('Mark this attempt as failed and start a new attempt at Day 1?');
+                if (!confirmed) return;
+
+                const failDate = selectedDate;
+                const newAttemptId = Date.now() + 1;
+                const newAttempt = {
+                    id: newAttemptId,
+                    attemptNumber: data.attempts.length + 1,
+                    startDate: todayString(),
+                    endDate: null,
+                    status: 'active',
+                    logs: {
+                        [todayString()]: {
+                            date: todayString(),
+                            tasks: makeBlankTaskState(),
+                            notes: '',
+                            completed: false,
+                            failed: false,
+                        }
+                    }
+                };
+
+                setData(prev => {
+                    const updatedAttempts = prev.attempts.map(attempt => {
+                        if (attempt.id !== prev.activeAttemptId) return attempt;
+                        const existingLog = getOrCreateLogObject(attempt, failDate);
+                        return {
+                            ...attempt,
+                            status: 'failed',
+                            endDate: failDate,
+                            logs: {
+                                ...(attempt.logs || {}),
+                                [failDate]: {
+                                    ...existingLog,
+                                    failed: true,
+                                    completed: false,
+                                },
+                            },
+                        };
+                    });
+
+                    return {
+                        ...prev,
+                        attempts: [...updatedAttempts, newAttempt],
+                        activeAttemptId: newAttemptId,
+                        selectedDate: todayString(),
+                    };
+                });
+                setView('dashboard');
+            };
+
+            const clearAllData = () => {
+                const confirmed = window.confirm('Clear all saved local data?');
+                if (!confirmed) return;
+                localStorage.removeItem(STORAGE_KEY);
+                setData(defaultData());
+                setView('dashboard');
+            };
+
+            const historyAttempts = [...data.attempts].sort((a, b) => b.attemptNumber - a.attemptNumber);
+            const groupedTasks = {
+                '75 Hard': TASKS.filter(task => task.category === '75 Hard'),
+                'Additional': TASKS.filter(task => task.category === 'Additional'),
+            };
+
+            return (
+                <div className="max-w-md mx-auto p-4 pb-24 space-y-4">
+                    <div className="pt-2">
+                        <h1 className="text-3xl font-bold tracking-tight">75 Hard Tracker</h1>
+                        <p className="text-sm text-gray-500 mt-1">75 Hard + your custom rules, with attempts and reset history.</p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => setView('dashboard')} className={`rounded-xl py-3 text-sm font-medium ${view === 'dashboard' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>Dashboard</button>
+                        <button onClick={() => setView('checklist')} className={`rounded-xl py-3 text-sm font-medium ${view === 'checklist' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>Checklist</button>
+                        <button onClick={() => setView('history')} className={`rounded-xl py-3 text-sm font-medium ${view === 'history' ? 'bg-gray-900 text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>History</button>
+                    </div>
+
+                    {!activeAttempt ? (
+                        <SectionCard title="No active attempt" subtitle="Start a new run when you are ready.">
+                            <div className="space-y-3">
+                                <button onClick={startNewAttempt} className="w-full bg-blue-600 text-white p-4 rounded-xl font-semibold">Start New Attempt</button>
+                                {data.attempts.length > 0 ? (
+                                    <button onClick={() => setView('history')} className="w-full bg-white border border-gray-300 text-gray-800 p-4 rounded-xl font-semibold">View Past Attempts</button>
+                                ) : null}
+                                <button onClick={clearAllData} className="w-full bg-white border border-red-300 text-red-600 p-4 rounded-xl font-semibold">Clear Local Data</button>
+                            </div>
+                        </SectionCard>
+                    ) : (
+                        <>
+                            {view === 'dashboard' && (
+                                <>
+                                    <SectionCard
+                                        title={`Attempt #${activeAttempt.attemptNumber}`}
+                                        subtitle={`Started ${activeAttempt.startDate}`}
+                                        right={<StatusBadge status={activeAttempt.status} />}
+                                    >
+                                        <div className="grid grid-cols-3 gap-3 text-center">
+                                            <div className="bg-gray-50 rounded-2xl p-3">
+                                                <div className="text-3xl font-bold">{currentDayNumber(activeAttempt)}</div>
+                                                <div className="text-xs text-gray-500 mt-1">Current day</div>
+                                            </div>
+                                            <div className="bg-gray-50 rounded-2xl p-3">
+                                                <div className="text-3xl font-bold">{activeAttemptCompletedDays}</div>
+                                                <div className="text-xs text-gray-500 mt-1">Days done</div>
+                                            </div>
+                                            <div className="bg-gray-50 rounded-2xl p-3">
+                                                <div className="text-3xl font-bold">{progressPercent}%</div>
+                                                <div className="text-xs text-gray-500 mt-1">Selected day</div>
+                                            </div>
+                                        </div>
+                                    </SectionCard>
+
+                                    <SectionCard title="Selected day" subtitle="Browse and edit logs by date.">
+                                        <div className="space-y-3">
+                                            <input
+                                                type="date"
+                                                value={selectedDate}
+                                                onChange={(e) => setSelectedDate(e.target.value)}
+                                                className="w-full rounded-xl border border-gray-300 px-3 py-3 bg-white"
+                                            />
+                                            <div className="text-sm text-gray-600">
+                                                Work target for this date: <span className="font-semibold">{workTargetForDate(selectedDate)} hours</span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setView('checklist')} className="flex-1 bg-blue-600 text-white rounded-xl py-3 font-semibold">Open Today’s Checklist</button>
+                                                <button onClick={completeSelectedDay} className="flex-1 bg-green-600 text-white rounded-xl py-3 font-semibold">Complete Day</button>
+                                            </div>
+                                            <button onClick={failAndReset} className="w-full bg-red-600 text-white rounded-xl py-3 font-semibold">Fail Attempt + Reset to Day 1</button>
+                                        </div>
+                                    </SectionCard>
+
+                                    <SectionCard title="Current status" subtitle="Completion for the selected log.">
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between"><span>Selected date</span><span className="font-medium">{selectedDate}</span></div>
+                                            <div className="flex justify-between"><span>Checklist complete</span><span className={`font-medium ${selectedDayComplete ? 'text-green-600' : 'text-gray-700'}`}>{selectedDayComplete ? 'Yes' : 'No'}</span></div>
+                                            <div className="flex justify-between"><span>Day status</span><span className="font-medium">{selectedLog?.failed ? 'Failed' : selectedLog?.completed ? 'Completed' : 'In progress'}</span></div>
+                                        </div>
+                                    </SectionCard>
+                                </>
+                            )}
+
+                            {view === 'checklist' && selectedLog && (
+                                <>
+                                    <SectionCard title="Checklist" subtitle={`Editing ${selectedDate}`} right={<StatusBadge status={selectedLog.failed ? 'failed' : selectedLog.completed ? 'completed' : 'active'} />}>
+                                        <div className="space-y-4">
+                                            {Object.entries(groupedTasks).map(([groupName, tasks]) => (
+                                                <div key={groupName} className="space-y-3">
+                                                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">{groupName}</h3>
+                                                    {tasks.map(task => (
+                                                        <TaskRow
+                                                            key={task.id}
+                                                            task={task}
+                                                            value={selectedLog.tasks[task.id]}
+                                                            dateStr={selectedDate}
+                                                            onChange={(value) => updateTask(task.id, value)}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </SectionCard>
+
+                                    <SectionCard title="Notes" subtitle="Optional notes for this day.">
+                                        <textarea
+                                            value={selectedLog.notes}
+                                            onChange={(e) => updateNotes(e.target.value)}
+                                            placeholder="How did today go?"
+                                            className="w-full min-h-[140px] rounded-xl border border-gray-300 px-3 py-3 bg-white"
+                                        />
+                                    </SectionCard>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button onClick={() => setView('dashboard')} className="bg-white border border-gray-300 text-gray-800 rounded-xl py-3 font-semibold">Back to Dashboard</button>
+                                        <button onClick={completeSelectedDay} className="bg-green-600 text-white rounded-xl py-3 font-semibold">Complete Day</button>
+                                    </div>
+                                </>
+                            )}
+
+                            {view === 'history' && (
+                                <SectionCard title="Attempt history" subtitle="Previous runs are preserved.">
+                                    <div className="space-y-3">
+                                        {historyAttempts.map(attempt => (
+                                            <div key={attempt.id} className="border border-gray-200 rounded-2xl p-4 bg-gray-50">
+                                                <div className="flex justify-between items-start gap-3">
+                                                    <div>
+                                                        <div className="font-semibold">Attempt #{attempt.attemptNumber}</div>
+                                                        <div className="text-sm text-gray-500 mt-1">{attempt.startDate} {attempt.endDate ? `→ ${attempt.endDate}` : '→ present'}</div>
+                                                    </div>
+                                                    <StatusBadge status={attempt.status} />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                                                    <div className="bg-white rounded-xl p-3">
+                                                        <div className="text-gray-500">Final day reached</div>
+                                                        <div className="text-xl font-semibold mt-1">{finalDayReached(attempt)}</div>
+                                                    </div>
+                                                    <div className="bg-white rounded-xl p-3">
+                                                        <div className="text-gray-500">Logs saved</div>
+                                                        <div className="text-xl font-semibold mt-1">{Object.keys(attempt.logs || {}).length}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        <button onClick={clearAllData} className="w-full bg-white border border-red-300 text-red-600 p-4 rounded-xl font-semibold">Clear Local Data</button>
+                                    </div>
+                                </SectionCard>
+                            )}
+                        </>
+                    )}
+
+                    <div className="text-center text-gray-400 text-xs pt-2">
+                        <p>Install via “Add to Home Screen” to use like an app.</p>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
