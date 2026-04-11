@@ -53,10 +53,10 @@
         color: 'border-blue-200 bg-blue-50',
         items: [
           { id: 'water', title: 'Water', type: 'multi', boxes: 5, boxLabel: '.8L each' },
-          { id: 'noCheatMeals', title: 'No cheat meals', type: 'single' },
-          { id: 'noAlcohol', title: 'No alcohol', type: 'single' },
-          { id: 'reading', title: '10 pages self-help read', type: 'single' },
-          { id: 'progressPic', title: 'Daily progress pic', type: 'single' },
+          { id: 'noCheatMeals', title: 'No cheat meals', type: 'singleRow' },
+          { id: 'noAlcohol', title: 'No alcohol', type: 'singleRow' },
+          { id: 'reading', title: '10 pages self-help read', type: 'singleRow' },
+          { id: 'progressPic', title: 'Daily progress pic', type: 'singleRow' },
         ],
       },
       {
@@ -64,9 +64,9 @@
         title: 'Practice / Training Blocks',
         color: 'border-purple-200 bg-purple-50',
         items: [
-          { id: 'language', title: 'Mandarin or Spanish', type: 'multi', boxes: 3, boxLabel: '5 min each' },
-          { id: 'music', title: 'Music practice', type: 'multi', boxes: 3, boxLabel: '10 min each' },
-          { id: 'coldShower', title: 'Cold shower (2+ min at end)', type: 'single' },
+          { id: 'language', title: 'Mandarin or Spanish', type: 'singleRow', subtitle: '15+ min total' },
+          { id: 'music', title: 'Music practice', type: 'singleRow', subtitle: '30+ min total' },
+          { id: 'coldShower', title: 'Cold shower', type: 'singleRow', subtitle: '2+ min at end' },
         ],
       },
       {
@@ -74,10 +74,10 @@
         title: 'Calls / Accountability',
         color: 'border-amber-200 bg-amber-50',
         items: [
-          { id: 'callFriend', title: 'Call a friend (15+ min)', type: 'single' },
-          { id: 'callDad', title: 'Call dad (5+ min)', type: 'single' },
-          { id: 'privateBoundary', title: 'Private boundary', type: 'single', endOfDay: true },
-          { id: 'noMarijuana', title: 'No marijuana', type: 'single', endOfDay: true },
+          { id: 'callFriend', title: 'Call a friend', type: 'singleRow', subtitle: '15+ min' },
+          { id: 'callDad', title: 'Call dad', type: 'singleRow', subtitle: '5+ min' },
+          { id: 'privateBoundary', title: 'Private boundary', type: 'singleRow', endOfDay: true },
+          { id: 'noMarijuana', title: 'No marijuana', type: 'singleRow', endOfDay: true },
         ],
       },
       {
@@ -86,7 +86,7 @@
         color: 'border-emerald-200 bg-emerald-50',
         items: [
           { id: 'workouts', title: 'Workout 1 / 2', type: 'workouts' },
-          { id: 'workoutsNotBackToBack', title: 'Workouts not back-to-back', type: 'single', subtitle: 'Confirm after both workouts', endOfDay: false },
+          { id: 'workoutsNotBackToBack', title: 'Workouts not back-to-back', type: 'singleRow', subtitle: 'Confirm after both workouts', endOfDay: false },
         ],
       },
       {
@@ -300,13 +300,15 @@
     function SingleItem({ title, checked, subtitle, onClick }) {
       return (
         <div className="rounded-lg bg-white/90 border border-white p-1.5 shadow-sm">
-          <div className="flex items-center justify-between gap-1 mb-1">
-            <div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 pr-2">
               <div className="font-semibold text-[11px] leading-tight">{title}</div>
               {subtitle ? <div className="text-[9px] text-slate-500 leading-tight">{subtitle}</div> : null}
             </div>
+            <div className="shrink-0 w-20">
+              <ActionBox checked={checked} label={checked ? 'Done' : 'Open'} onClick={onClick} />
+            </div>
           </div>
-          <ActionBox checked={checked} label={checked ? 'Done' : 'Open'} onClick={onClick} />
         </div>
       );
     }
@@ -526,7 +528,7 @@
             </div>
           </section>
 
-          <main className="grid grid-cols-3 gap-1.5 items-start">
+          <main className="grid grid-cols-2 gap-1.5 items-start">
             {normalGroups.map(group => (
               <GroupCard key={group.id} group={group}>
                 {group.items.map(item => {
@@ -568,7 +570,7 @@
                     <SingleItem
                       key={item.id}
                       title={item.title}
-                      subtitle={item.subtitle || (item.id === 'callFriend' ? '15+ min' : item.id === 'callDad' ? '5+ min' : '')}
+                      subtitle={item.subtitle || ''}
                       checked={tasks[item.id]}
                       onClick={() => toggleSingle(item.id)}
                     />
