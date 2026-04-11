@@ -192,7 +192,7 @@
       return (
         <button
           onClick={onClick}
-          className={`w-full rounded-md border px-1 py-2 text-[8px] font-semibold leading-tight transition ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
+          className={`w-full rounded-md border px-0.5 py-2 text-[7px] font-semibold leading-tight transition ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
         >
           {label}
         </button>
@@ -214,7 +214,7 @@
               <button
                 key={idx}
                 onClick={() => onToggle(idx)}
-                className={`rounded-md px-1 py-2 text-[9px] font-bold border ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
+                className={`rounded-md px-0.5 py-2 text-[7px] font-bold border ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
               >
                 {idx + 1}
               </button>
@@ -232,7 +232,7 @@
               <div className="font-semibold text-[11px] leading-tight">Workout Tracking</div>
               <div className="text-[9px] text-slate-500 leading-tight">2 x 2 grid</div>
             </div>
-            <div className="shrink-0 w-20">
+            <div className="shrink-0 w-12">
               <ActionBox
                 checked={notBackToBack}
                 label={notBackToBack ? 'Spaced' : 'Spacing'}
@@ -253,12 +253,12 @@
             />
             <ActionBox
               checked={workouts[0].outside}
-              label="Outside 1"
+              label="Out 1"
               onClick={() => onToggleOutside(0)}
             />
             <ActionBox
               checked={workouts[1].outside}
-              label="Outside 2"
+              label="Out 2"
               onClick={() => onToggleOutside(1)}
             />
           </div>
@@ -268,10 +268,10 @@
 
     function GuardrailsGrid({ tasks, onToggle }) {
       const items = [
-        { id: 'noCheatMeals', title: 'No cheat meals' },
-        { id: 'noAlcohol', title: 'No alcohol' },
-        { id: 'privateBoundary', title: 'Private boundary' },
-        { id: 'noMarijuana', title: 'No marijuana' },
+        { id: 'noCheatMeals', title: 'No cheats' },
+        { id: 'noAlcohol', title: 'No alc' },
+        { id: 'privateBoundary', title: 'Private' },
+        { id: 'noMarijuana', title: 'No weed' },
       ];
 
       return (
@@ -311,7 +311,7 @@
                 <button
                   key={idx}
                   onClick={() => !disabled && onToggle(idx)}
-                  className={`rounded-md px-1 py-2 text-[9px] font-bold border ${disabled ? 'bg-slate-200 border-slate-200 text-slate-400 cursor-not-allowed' : checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
+                  className={`rounded-md px-0.5 py-2 text-[7px] font-bold border ${disabled ? 'bg-slate-200 border-slate-200 text-slate-400 cursor-not-allowed' : checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
                 >
                   {idx + 1}
                 </button>
@@ -330,7 +330,7 @@
               <div className="font-semibold text-[11px] leading-tight">{title}</div>
               {subtitle ? <div className="text-[9px] text-slate-500 leading-tight">{subtitle}</div> : null}
             </div>
-            <div className="shrink-0 w-16">
+            <div className="shrink-0 w-10">
               <ActionBox checked={checked} label={checked ? 'Done' : 'Open'} onClick={onClick} />
             </div>
           </div>
