@@ -2,12 +2,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
   <title>81 Hard Tracker</title>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="75 Hard" />
+  <meta name="apple-mobile-web-app-title" content="81 Hard" />
   <meta name="mobile-web-app-capable" content="yes" />
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -45,9 +48,11 @@
     const { useEffect, useMemo, useRef, useState } = React;
 
     const APP_NAME = '81 Hard Tracker';
-    const APP_VERSION = 'v2';
-    const STORAGE_KEY = '81hard_dashboard_v2';
-    const BACKUP_KEY = '81hard_dashboard_v2_backup';
+    const APP_VERSION = 'v3';
+    const STORAGE_KEY = '81hard_dashboard_v3';
+    const BACKUP_KEY = '81hard_dashboard_v3_backup';
+    const LEGACY_STORAGE_KEY = '81hard_dashboard_v2';
+    const LEGACY_BACKUP_KEY = '81hard_dashboard_v2_backup';
     const EXPORT_VERSION = 1;
 
     const GROUPS = [
@@ -201,6 +206,31 @@
         }
       } catch (e) {}
 
+      let fromLegacy = null;
+      try {
+        const legacyPrimary = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacyPrimary) {
+          fromLegacy = sanitizeData(JSON.parse(legacyPrimary));
+        }
+      } catch (e) {}
+      if (!fromLegacy) {
+        try {
+          const legacyBackupRaw = localStorage.getItem(LEGACY_BACKUP_KEY);
+          if (legacyBackupRaw) {
+            const parsedBackup = JSON.parse(legacyBackupRaw);
+            if (parsedBackup && parsedBackup.data) {
+              fromLegacy = sanitizeData(parsedBackup.data);
+            }
+          }
+        } catch (e) {}
+      }
+      if (fromLegacy) {
+        saveDataState(fromLegacy);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_BACKUP_KEY);
+        return fromLegacy;
+      }
+
       return defaultData();
     }
 
@@ -234,7 +264,7 @@
 
     function isDayCompleted(log) {
       if (!log || log.failed) return false;
-      return completionCounts(log.tasks, log.date).done === 15;
+      return completionCounts(log.tasks, log.date).done === 14;
     }
 
     function daysCompletedWithinWindow(logs, challengeStartDate) {
@@ -928,6 +958,13 @@
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker.register("./sw.js").catch((err) => {
+            console.error("SW registration failed:", err);
+            });
+        });
+    }
   </script>
 </body>
 </html>
