@@ -45,6 +45,7 @@
     const { useEffect, useMemo, useRef, useState } = React;
 
     const APP_NAME = '81 Hard Tracker';
+    const APP_VERSION = 'v1';
     const STORAGE_KEY = '81hard_dashboard_v2';
     const BACKUP_KEY = '81hard_dashboard_v2_backup';
     const EXPORT_VERSION = 1;
@@ -207,17 +208,17 @@
       return Array.isArray(arr) && arr.length > 0 && arr.every(Boolean);
     }
 
-    function areWorkoutsComplete(workouts) {
-      return Array.isArray(workouts) && workouts.every(w => w.done) && workouts.some(w => w.outside);
+    function areWorkoutsComplete(workouts, notBackToBack) {
+      return Array.isArray(workouts) && workouts.every(w => w.done) && workouts.some(w => w.outside) && notBackToBack === true;
     }
 
-    function isTaskComplete(id, value, dateStr) {
+    function isTaskComplete(id, value, dateStr, tasks) {
       if (id === 'water') return isArrayComplete(value);
       if (id === 'workHours') {
         const required = workTarget(dateStr);
         return Array.isArray(value) && value.slice(0, required).every(Boolean);
       }
-      if (id === 'workouts') return areWorkoutsComplete(value);
+      if (id === 'workouts') return areWorkoutsComplete(value, tasks?.workoutsNotBackToBack);
       return value === true;
     }
 
@@ -225,9 +226,9 @@
       const allIds = [
         'water', 'noCheatMeals', 'noAlcohol', 'reading', 'progressPic',
         'language', 'music', 'coldShower', 'callFriend', 'callDad',
-        'privateBoundary', 'noMarijuana', 'workouts', 'workoutsNotBackToBack', 'workHours'
+        'privateBoundary', 'noMarijuana', 'workouts', 'workHours'
       ];
-      const done = allIds.filter(id => isTaskComplete(id, tasks[id], dateStr)).length;
+      const done = allIds.filter(id => isTaskComplete(id, tasks[id], dateStr, tasks)).length;
       return { done, total: allIds.length, percent: Math.round((done / allIds.length) * 100) };
     }
 
@@ -276,18 +277,25 @@
       const blankWeekday = createBlankTasks(weekday);
       pass('Blank tasks contain 8 work blocks', Array.isArray(blankWeekday.workHours) && blankWeekday.workHours.length === 8);
       pass('Blank tasks contain 5 water blocks', Array.isArray(blankWeekday.water) && blankWeekday.water.length === 5);
+      pass('Blank tasks start with language unchecked', blankWeekday.language === false);
+      pass('Blank tasks start with music unchecked', blankWeekday.music === false);
 
       const normalizedWeekend = normalizeTasksForDate({ workHours: [true, true, true] }, weekend);
       pass('Weekend normalization still preserves 8 total work slots', normalizedWeekend.workHours.length === 8);
       pass('Weekend work completion passes with first 3 checked', isTaskComplete('workHours', [true, true, true, false, false, false, false, false], weekend));
       pass('Weekday work completion fails with only first 3 checked', !isTaskComplete('workHours', [true, true, true, false, false, false, false, false], weekday));
+      pass('Weekday work completion passes with all 8 checked', isTaskComplete('workHours', [true, true, true, true, true, true, true, true], weekday));
+      pass('Water completion requires all 5 blocks', !isTaskComplete('water', [true, true, true, true, false], weekday));
+      pass('Water completion passes with all 5 blocks', isTaskComplete('water', [true, true, true, true, true], weekday));
 
       const workoutComplete = [
         { done: true, outside: true },
         { done: true, outside: false },
       ];
-      pass('Workout completion requires both done plus one outside', isTaskComplete('workouts', workoutComplete, weekday));
-      pass('Workout completion fails if one workout missing', !isTaskComplete('workouts', [{ done: true, outside: true }, { done: false, outside: false }], weekday));
+      pass('Workout completion requires both done plus one outside plus spacing', isTaskComplete('workouts', workoutComplete, weekday, { workoutsNotBackToBack: true }));
+      pass('Workout completion fails if one workout missing', !isTaskComplete('workouts', [{ done: true, outside: true }, { done: false, outside: false }], weekday, { workoutsNotBackToBack: true }));
+      pass('Workout completion fails if spacing is missing', !isTaskComplete('workouts', workoutComplete, weekday, { workoutsNotBackToBack: false }));
+      pass('Workout completion fails if no workout is outside', !isTaskComplete('workouts', [{ done: true, outside: false }, { done: true, outside: false }], weekday, { workoutsNotBackToBack: true }));
 
       const completeLog = {
         date: weekday,
@@ -313,11 +321,88 @@
       };
 
       pass('Completed log is detected as completed', isDayCompleted(completeLog));
-      pass('Sanitizer restores missing fields safely', !!sanitizeData({ activeDay: weekday, logs: { [weekday]: { date: weekday, tasks: {} } } }).logs[weekday]);
-      pass('Backup wrapper preserves nested data field', !!sanitizeData({ activeDay: weekday, challengeStartDate: weekday, logs: { [weekday]: completeLog } }).logs[weekday]);
+      pass('Failed log is never treated as completed', !isDayCompleted({ ...completeLog, failed: true }));
+      pass('Completion count totals 14 tracked items', completionCounts(completeLog.tasks, weekday).total === 14);
+      pass('Completion count reaches 14 when day is complete', completionCounts(completeLog.tasks, weekday).done === 14);
 
-      const failedLog = { ...completeLog, failed: true };
-      pass('Failed log is never treated as completed', !isDayCompleted(failedLog));
+      const sanitizedMinimal = sanitizeData({ activeDay: weekday, logs: { [weekday]: { date: weekday, tasks: {} } } });
+      pass('Sanitizer restores missing fields safely', !!sanitizedMinimal.logs[weekday]);
+      pass('Sanitizer restores active day log when missing', !!sanitizeData({ activeDay: weekday, logs: {} }).logs[weekday]);
+      pass('Sanitizer preserves challenge start date if present', sanitizeData({ activeDay: weekday, challengeStartDate: '2026-04-01', logs: {} }).challengeStartDate === '2026-04-01');
+      pass('Backup wrapper preserves nested data field', !!sanitizeData({ activeDay: weekday, challengeStartDate: weekday, logs: { [weekday]: completeLog } }).logs[weekday]);
+      pass('Malformed log entries are dropped', !sanitizeData({ activeDay: weekday, logs: { bad: { nope: true } } }).logs.bad);
+      pass('Work hour arrays are normalized back to 8 slots', sanitizeData({ activeDay: weekday, logs: { [weekday]: { date: weekday, failed: false, tasks: { workHours: [true, true, true] } } } }).logs[weekday].tasks.workHours.length === 8);
+      pass('Notes are preserved during sanitation', sanitizeData({ activeDay: weekday, logs: { [weekday]: { date: weekday, failed: false, notes: 'hello', tasks: {} } } }).logs[weekday].notes === 'hello');
+
+      const completedWindowLogs = {
+        '2026-04-01': completeLog,
+        '2026-06-20': { ...completeLog, date: '2026-06-20' },
+        '2026-07-01': { ...completeLog, date: '2026-07-01' },
+      };
+      pass('Completed-day counter includes days inside 81-day window only', daysCompletedWithinWindow(completedWindowLogs, '2026-04-01') === 2);
+
+      const calendar = buildCalendarDays('2026-04-01', {
+        '2026-04-01': completeLog,
+        '2026-04-02': { ...completeLog, date: '2026-04-02', failed: true },
+      });
+      pass('Calendar creates exactly 81 days', calendar.length === 81);
+      pass('Calendar starts at day number 1', calendar[0].number === 1);
+      pass('Calendar ends at day number 81', calendar[80].number === 81);
+      pass('Calendar marks completed day green-state candidate', calendar[0].completed === true);
+      pass('Calendar marks failed day red-state candidate', calendar[1].failed === true);
+
+      const originalPrimary = localStorage.getItem(STORAGE_KEY);
+      const originalBackup = localStorage.getItem(BACKUP_KEY);
+      try {
+        const roundTripData = sanitizeData({
+          activeDay: weekday,
+          challengeStartDate: '2026-04-01',
+          logs: { [weekday]: completeLog },
+          history: [{ tag: 'test' }],
+        });
+
+        saveDataState(roundTripData);
+        const loadedRoundTrip = loadData();
+        pass('Primary save/load roundtrip preserves active day', loadedRoundTrip.activeDay === weekday);
+        pass('Primary save/load roundtrip preserves challenge start date', loadedRoundTrip.challengeStartDate === '2026-04-01');
+        pass('Primary save/load roundtrip preserves completed day', isDayCompleted(loadedRoundTrip.logs[weekday]));
+
+        localStorage.setItem(STORAGE_KEY, '{broken json');
+        localStorage.setItem(BACKUP_KEY, JSON.stringify({ savedAt: new Date().toISOString(), data: roundTripData }));
+        const loadedFromBackup = loadData();
+        pass('Corrupted primary falls back to backup', loadedFromBackup.activeDay === weekday);
+        pass('Corrupted primary fallback preserves completed log', isDayCompleted(loadedFromBackup.logs[weekday]));
+
+        localStorage.setItem(STORAGE_KEY, '{broken json');
+        localStorage.setItem(BACKUP_KEY, '{also broken');
+        const loadedFromDefault = loadData();
+        pass('Corrupted primary and backup fall back to default data', !!loadedFromDefault.logs[loadedFromDefault.activeDay]);
+        pass('Default fallback creates exactly one active-day log', Object.keys(loadedFromDefault.logs).length >= 1);
+
+        const exportPayload = {
+          appName: APP_NAME,
+          exportVersion: EXPORT_VERSION,
+          exportedAt: new Date().toISOString(),
+          data: roundTripData,
+        };
+        const imported = sanitizeData(exportPayload.data);
+        pass('Export/import roundtrip preserves active day', imported.activeDay === roundTripData.activeDay);
+        pass('Export/import roundtrip preserves completed status', isDayCompleted(imported.logs[weekday]));
+      } catch (err) {
+        pass('Diagnostics localStorage roundtrip block did not throw', false);
+      } finally {
+        if (originalPrimary === null) {
+          localStorage.removeItem(STORAGE_KEY);
+        } else {
+          localStorage.setItem(STORAGE_KEY, originalPrimary);
+        }
+
+        if (originalBackup === null) {
+          localStorage.removeItem(BACKUP_KEY);
+        } else {
+          localStorage.setItem(BACKUP_KEY, originalBackup);
+        }
+      }
 
       const diagnosticsPassed = results.filter(r => r.ok).length;
       const diagnosticsTotal = results.length;
@@ -669,13 +754,16 @@
       function runDiagnostics() {
         setDiagnostics(runDiagnosticsSuite());
       }
+      function closeDiagnostics() {
+        setDiagnostics(null);
+      }
 
       return (
         <div className="w-full min-h-screen bg-slate-100 p-1.5 space-y-1.5 overflow-y-auto">
           <header className="rounded-xl bg-slate-900 text-white p-2 shadow-sm">
             <div className="flex flex-col gap-1">
               <div>
-                <h1 className="text-[13px] font-bold tracking-tight">81 Hard Tracker</h1>
+                <h1 className="text-[13px] font-bold tracking-tight">81 Hard Tracker {APP_VERSION}</h1>
                 <p className="text-[9px] text-slate-300 mt-0.5">Tiny portrait dashboard. Phone can scroll if needed.</p>
               </div>
               <div className="grid grid-cols-6 gap-1">
@@ -730,11 +818,14 @@
             </div>
             <input ref={importInputRef} type="file" accept="application/json" className="hidden" onChange={handleImport} />
             <div className="mt-1 text-[9px] text-slate-600">
-              Backups: local primary + local backup mirror + manual JSON export/import
+              Backups: local primary + local backup mirror + manual JSON export/import · {APP_VERSION}
             </div>
             {diagnostics ? (
               <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-[8px] text-slate-700">
-                <div className="font-semibold">Diagnostics: {diagnostics.diagnosticsPassed}/{diagnostics.diagnosticsTotal} passed</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-semibold">Diagnostics: {diagnostics.diagnosticsPassed}/{diagnostics.diagnosticsTotal} passed</div>
+                  <button onClick={closeDiagnostics} className="rounded-md bg-slate-900 text-white px-2 py-1 text-[8px] font-semibold">Close</button>
+                </div>
                 <div className="mt-1 grid grid-cols-2 gap-1">
                   {diagnostics.results.map(result => (
                     <div key={result.name} className={`rounded-sm px-1 py-1 ${result.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
