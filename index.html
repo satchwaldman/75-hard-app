@@ -48,53 +48,17 @@
 
     const GROUPS = [
       {
-        id: 'core',
-        title: 'Core 75 Hard',
-        color: 'border-blue-200 bg-blue-50',
+        id: 'dailyChecklist',
+        title: 'Daily Checklist',
+        color: 'border-slate-200 bg-slate-50',
         items: [
-          { id: 'water', title: 'Water', type: 'multi', boxes: 5, boxLabel: '.8L each' },
-          { id: 'noCheatMeals', title: 'No cheat meals', type: 'singleRow' },
-          { id: 'noAlcohol', title: 'No alcohol', type: 'singleRow' },
           { id: 'reading', title: '10 pages self-help read', type: 'singleRow' },
           { id: 'progressPic', title: 'Daily progress pic', type: 'singleRow' },
-        ],
-      },
-      {
-        id: 'training',
-        title: 'Practice / Training Blocks',
-        color: 'border-purple-200 bg-purple-50',
-        items: [
           { id: 'language', title: 'Mandarin or Spanish', type: 'singleRow', subtitle: '15+ min total' },
           { id: 'music', title: 'Music practice', type: 'singleRow', subtitle: '30+ min total' },
           { id: 'coldShower', title: 'Cold shower', type: 'singleRow', subtitle: '2+ min at end' },
-        ],
-      },
-      {
-        id: 'social',
-        title: 'Calls / Accountability',
-        color: 'border-amber-200 bg-amber-50',
-        items: [
           { id: 'callFriend', title: 'Call a friend', type: 'singleRow', subtitle: '15+ min' },
           { id: 'callDad', title: 'Call dad', type: 'singleRow', subtitle: '5+ min' },
-          { id: 'privateBoundary', title: 'Private boundary', type: 'singleRow', endOfDay: true },
-          { id: 'noMarijuana', title: 'No marijuana', type: 'singleRow', endOfDay: true },
-        ],
-      },
-      {
-        id: 'fitness',
-        title: 'Workout Tracking',
-        color: 'border-emerald-200 bg-emerald-50',
-        items: [
-          { id: 'workouts', title: 'Workout 1 / 2', type: 'workouts' },
-          { id: 'workoutsNotBackToBack', title: 'Workouts not back-to-back', type: 'singleRow', subtitle: 'Confirm after both workouts', endOfDay: false },
-        ],
-      },
-      {
-        id: 'work',
-        title: 'Work Blocks',
-        color: 'border-cyan-200 bg-cyan-50',
-        items: [
-          { id: 'workHours', title: 'Work', type: 'workBlocks' },
         ],
       },
     ];
@@ -129,8 +93,8 @@
         noAlcohol: false,
         reading: false,
         progressPic: false,
-        language: [false, false, false],
-        music: [false, false, false],
+        language: false,
+        music: false,
         coldShower: false,
         callFriend: false,
         callDad: false,
@@ -141,14 +105,13 @@
           { done: false, outside: false },
         ],
         workoutsNotBackToBack: false,
-        workHours: Array.from({ length: workTarget(dateStr) }, () => false),
+        workHours: Array.from({ length: 8 }, () => false),
       };
     }
 
     function normalizeTasksForDate(tasks, dateStr) {
-      const target = workTarget(dateStr);
       const current = Array.isArray(tasks?.workHours) ? tasks.workHours : [];
-      const workHours = Array.from({ length: target }, (_, i) => Boolean(current[i]));
+      const workHours = Array.from({ length: 8 }, (_, i) => Boolean(current[i]));
       return {
         ...createBlankTasks(dateStr),
         ...tasks,
@@ -205,7 +168,11 @@
     }
 
     function isTaskComplete(id, value, dateStr) {
-      if (id === 'water' || id === 'language' || id === 'music' || id === 'workHours') return isArrayComplete(value);
+      if (id === 'water') return isArrayComplete(value);
+      if (id === 'workHours') {
+        const required = workTarget(dateStr);
+        return Array.isArray(value) && value.slice(0, required).every(Boolean);
+      }
       if (id === 'workouts') return areWorkoutsComplete(value);
       return value === true;
     }
@@ -220,17 +187,12 @@
       return { done, total: allIds.length, percent: Math.round((done / allIds.length) * 100) };
     }
 
-    function endOfDayCounts(tasks, dateStr) {
-      const ids = Array.from(END_OF_DAY_IDS);
-      const done = ids.filter(id => isTaskComplete(id, tasks[id], dateStr)).length;
-      return { done, total: ids.length };
-    }
 
     function ActionBox({ checked, label, onClick }) {
       return (
         <button
           onClick={onClick}
-          className={`w-full rounded-md border px-1.5 py-1.5 text-[9px] font-semibold leading-tight transition ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
+          className={`w-full rounded-md border px-1 py-2 text-[8px] font-semibold leading-tight transition ${checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
         >
           {label}
         </button>
@@ -262,36 +224,99 @@
       );
     }
 
-    function WorkoutItem({ workouts, onToggleDone, onToggleOutside }) {
+    function WorkoutItem({ workouts, notBackToBack, onToggleDone, onToggleOutside, onToggleNotBackToBack }) {
+      return (
+        <div className="rounded-lg bg-white/90 border border-white p-1.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div>
+              <div className="font-semibold text-[11px] leading-tight">Workout Tracking</div>
+              <div className="text-[9px] text-slate-500 leading-tight">2 x 2 grid</div>
+            </div>
+            <div className="shrink-0 w-20">
+              <ActionBox
+                checked={notBackToBack}
+                label={notBackToBack ? 'Spaced' : 'Spacing'}
+                onClick={onToggleNotBackToBack}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <ActionBox
+              checked={workouts[0].done}
+              label="Workout 1"
+              onClick={() => onToggleDone(0)}
+            />
+            <ActionBox
+              checked={workouts[1].done}
+              label="Workout 2"
+              onClick={() => onToggleDone(1)}
+            />
+            <ActionBox
+              checked={workouts[0].outside}
+              label="Outside 1"
+              onClick={() => onToggleOutside(0)}
+            />
+            <ActionBox
+              checked={workouts[1].outside}
+              label="Outside 2"
+              onClick={() => onToggleOutside(1)}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    function GuardrailsGrid({ tasks, onToggle }) {
+      const items = [
+        { id: 'noCheatMeals', title: 'No cheat meals' },
+        { id: 'noAlcohol', title: 'No alcohol' },
+        { id: 'privateBoundary', title: 'Private boundary' },
+        { id: 'noMarijuana', title: 'No marijuana' },
+      ];
+
+      return (
+        <div className="rounded-lg bg-white/90 border border-white p-1.5 shadow-sm">
+          <div className="mb-1">
+            <div className="font-semibold text-[11px] leading-tight">Daily Guardrails</div>
+            <div className="text-[9px] text-slate-500 leading-tight">2 x 2</div>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {items.map(item => (
+              <ActionBox
+                key={item.id}
+                checked={tasks[item.id]}
+                label={item.title}
+                onClick={() => onToggle(item.id)}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function WorkBlocksGrid({ values, weekend, onToggle }) {
       return (
         <div className="rounded-lg bg-white/90 border border-white p-1.5 shadow-sm">
           <div className="flex items-center justify-between gap-1 mb-1">
             <div>
-              <div className="font-semibold text-[11px] leading-tight">Workouts</div>
-              <div className="text-[9px] text-slate-500 leading-tight">2 total, one outside</div>
+              <div className="font-semibold text-[11px] leading-tight">Work Blocks</div>
+              <div className="text-[9px] text-slate-500 leading-tight">4 across, 2 down</div>
             </div>
-            <div className="text-[9px] font-medium text-slate-500">
-              {workouts.filter(w => w.done).length}/2
-            </div>
+            <div className="text-[9px] font-medium text-slate-500">{weekend ? 'Weekend' : 'Weekday'}</div>
           </div>
-          <div className="space-y-1">
-            {workouts.map((workout, idx) => (
-              <div key={idx} className="rounded-md border border-slate-200 p-1.5 bg-slate-50">
-                <div className="font-medium text-[10px] mb-1">Workout {idx + 1}</div>
-                <div className="grid grid-cols-2 gap-1">
-                  <ActionBox
-                    checked={workout.done}
-                    label={workout.done ? 'Done' : 'Open'}
-                    onClick={() => onToggleDone(idx)}
-                  />
-                  <ActionBox
-                    checked={workout.outside}
-                    label={workout.outside ? 'Outside' : 'Inside'}
-                    onClick={() => onToggleOutside(idx)}
-                  />
-                </div>
-              </div>
-            ))}
+          <div className="grid grid-cols-4 gap-1">
+            {values.map((checked, idx) => {
+              const disabled = weekend && idx >= 3;
+              return (
+                <button
+                  key={idx}
+                  onClick={() => !disabled && onToggle(idx)}
+                  className={`rounded-md px-1 py-2 text-[9px] font-bold border ${disabled ? 'bg-slate-200 border-slate-200 text-slate-400 cursor-not-allowed' : checked ? 'bg-green-600 border-green-600 text-white' : 'bg-red-600 border-red-600 text-white'}`}
+                >
+                  {idx + 1}
+                </button>
+              );
+            })}
           </div>
         </div>
       );
@@ -305,7 +330,7 @@
               <div className="font-semibold text-[11px] leading-tight">{title}</div>
               {subtitle ? <div className="text-[9px] text-slate-500 leading-tight">{subtitle}</div> : null}
             </div>
-            <div className="shrink-0 w-20">
+            <div className="shrink-0 w-16">
               <ActionBox checked={checked} label={checked ? 'Done' : 'Open'} onClick={onClick} />
             </div>
           </div>
@@ -330,7 +355,6 @@
       const log = data.logs[activeDate] || { date: activeDate, tasks: createBlankTasks(activeDate), notes: '', failed: false };
       const tasks = useMemo(() => normalizeTasksForDate(log.tasks, activeDate), [log.tasks, activeDate]);
       const stats = completionCounts(tasks, activeDate);
-      const eodStats = endOfDayCounts(tasks, activeDate);
       const weekend = isWeekend(activeDate);
 
       useEffect(() => {
@@ -467,14 +491,6 @@
         setData(defaultData());
       }
 
-      const normalGroups = GROUPS.map(group => ({
-        ...group,
-        items: group.items.filter(item => !item.endOfDay),
-      })).filter(group => group.items.length > 0);
-
-      const endOfDayItems = GROUPS.flatMap(group =>
-        group.items.filter(item => item.endOfDay).map(item => ({ ...item, parentTitle: group.title }))
-      );
 
       return (
         <div className="w-full min-h-screen bg-slate-100 p-1.5 space-y-1.5 overflow-y-auto">
@@ -524,72 +540,22 @@
               <button onClick={clearAll} className="rounded-md bg-slate-900 text-white px-2 py-1.5 text-[9px] font-semibold">Clear</button>
             </div>
             <div className="mt-1 text-[9px] text-slate-600">
-              End-of-day: <span className="font-semibold">{eodStats.done}/{eodStats.total}</span>
+              Layout: checklist on left, blocks on right
             </div>
           </section>
 
-          <main className="grid grid-cols-2 gap-1.5 items-start">
-            {normalGroups.map(group => (
-              <GroupCard key={group.id} group={group}>
-                {group.items.map(item => {
-                  if (item.type === 'multi') {
-                    return (
-                      <MultiBoxItem
-                        key={item.id}
-                        title={item.title}
-                        boxes={item.boxes}
-                        boxLabel={item.boxLabel}
-                        values={tasks[item.id]}
-                        onToggle={(idx) => toggleArrayItem(item.id, idx)}
-                      />
-                    );
-                  }
-                  if (item.type === 'workouts') {
-                    return (
-                      <WorkoutItem
-                        key={item.id}
-                        workouts={tasks.workouts}
-                        onToggleDone={toggleWorkoutDone}
-                        onToggleOutside={toggleWorkoutOutside}
-                      />
-                    );
-                  }
-                  if (item.type === 'workBlocks') {
-                    return (
-                      <MultiBoxItem
-                        key={item.id}
-                        title={`Work (${weekend ? 'weekend' : 'weekday'})`}
-                        boxes={workTarget(activeDate)}
-                        boxLabel="1 hour each"
-                        values={tasks.workHours}
-                        onToggle={(idx) => toggleArrayItem('workHours', idx)}
-                      />
-                    );
-                  }
-                  return (
-                    <SingleItem
-                      key={item.id}
-                      title={item.title}
-                      subtitle={item.subtitle || ''}
-                      checked={tasks[item.id]}
-                      onClick={() => toggleSingle(item.id)}
-                    />
-                  );
-                })}
-              </GroupCard>
-            ))}
-
-            <section className="rounded-xl border border-rose-200 bg-rose-50 p-1.5 shadow-sm">
+          <main className="grid grid-cols-3 gap-1.5 items-start">
+            <section className="col-span-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
               <div className="mb-1">
-                <h2 className="text-[12px] font-bold">End of Day</h2>
-                <p className="text-[9px] text-slate-600">Leave these for the end.</p>
+                <h2 className="text-[12px] font-bold leading-tight">Daily Checklist</h2>
+                <p className="text-[9px] text-slate-500 leading-tight">7 rows</p>
               </div>
               <div className="space-y-1">
-                {endOfDayItems.map(item => (
+                {GROUPS[0].items.map(item => (
                   <SingleItem
                     key={item.id}
                     title={item.title}
-                    subtitle={item.parentTitle}
+                    subtitle={item.subtitle || ''}
                     checked={tasks[item.id]}
                     onClick={() => toggleSingle(item.id)}
                   />
@@ -597,26 +563,40 @@
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
-              <div className="mb-1">
-                <h2 className="text-[12px] font-bold">Notes</h2>
-                <p className="text-[9px] text-slate-600">Honor-code log.</p>
+            <section className="col-span-2 grid grid-cols-1 gap-1.5">
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-1.5 shadow-sm">
+                <div className="mb-1">
+                  <h2 className="text-[12px] font-bold leading-tight">Hydration</h2>
+                </div>
+                <MultiBoxItem
+                  title="Water"
+                  boxes={5}
+                  boxLabel=".8L each"
+                  values={tasks.water}
+                  onToggle={(idx) => toggleArrayItem('water', idx)}
+                />
               </div>
-              <textarea
-                value={log.notes || ''}
-                onChange={(e) => updateCurrentLog(current => ({ ...current, notes: e.target.value }))}
-                placeholder="Quick notes"
-                className="w-full min-h-[88px] rounded-lg border border-slate-300 px-1.5 py-1.5 text-[9px]"
-              />
-              <div className="mt-1 grid grid-cols-2 gap-1 text-[9px]">
-                <div className="rounded-lg bg-slate-100 p-1.5">
-                  <div className="text-slate-500">Manual day</div>
-                  <div className="font-semibold mt-0.5">Yes</div>
-                </div>
-                <div className="rounded-lg bg-slate-100 p-1.5">
-                  <div className="text-slate-500">Auto reset</div>
-                  <div className="font-semibold mt-0.5">No</div>
-                </div>
+
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-1.5 shadow-sm">
+                <WorkBlocksGrid
+                  values={tasks.workHours}
+                  weekend={weekend}
+                  onToggle={(idx) => toggleArrayItem('workHours', idx)}
+                />
+              </div>
+
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-1.5 shadow-sm">
+                <GuardrailsGrid tasks={tasks} onToggle={toggleSingle} />
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-1.5 shadow-sm">
+                <WorkoutItem
+                  workouts={tasks.workouts}
+                  notBackToBack={tasks.workoutsNotBackToBack}
+                  onToggleDone={toggleWorkoutDone}
+                  onToggleOutside={toggleWorkoutOutside}
+                  onToggleNotBackToBack={() => toggleSingle('workoutsNotBackToBack')}
+                />
               </div>
             </section>
           </main>
