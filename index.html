@@ -42,9 +42,12 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useEffect, useMemo, useState } = React;
+    const { useEffect, useMemo, useRef, useState } = React;
 
-    const STORAGE_KEY = '75hard_dashboard_test_v1';
+    const APP_NAME = '81 Hard Tracker';
+    const STORAGE_KEY = '81hard_dashboard_v2';
+    const BACKUP_KEY = '81hard_dashboard_v2_backup';
+    const EXPORT_VERSION = 1;
 
     const GROUPS = [
       {
@@ -62,13 +65,6 @@
         ],
       },
     ];
-
-    const END_OF_DAY_IDS = new Set([
-      'noCheatMeals',
-      'noAlcohol',
-      'privateBoundary',
-      'noMarijuana',
-    ]);
 
     function todayString() {
       const now = new Date();
@@ -119,6 +115,25 @@
       };
     }
 
+    function isLogShapeValid(log) {
+      return !!log && typeof log === 'object' && typeof log.date === 'string' && typeof log.failed === 'boolean' && !!log.tasks;
+    }
+
+    function sanitizeLogs(logs) {
+      if (!logs || typeof logs !== 'object') return {};
+      const result = {};
+      Object.entries(logs).forEach(([date, log]) => {
+        if (!isLogShapeValid(log)) return;
+        result[date] = {
+          date,
+          tasks: normalizeTasksForDate(log.tasks, date),
+          notes: typeof log.notes === 'string' ? log.notes : '',
+          failed: !!log.failed,
+        };
+      });
+      return result;
+    }
+
     function defaultData() {
       const date = todayString();
       return {
@@ -136,29 +151,56 @@
       };
     }
 
+    function sanitizeData(rawData) {
+      const fallback = defaultData();
+      if (!rawData || typeof rawData !== 'object') return fallback;
+
+      const activeDay = typeof rawData.activeDay === 'string' ? rawData.activeDay : fallback.activeDay;
+      const challengeStartDate = typeof rawData.challengeStartDate === 'string' ? rawData.challengeStartDate : activeDay;
+      const logs = sanitizeLogs(rawData.logs);
+
+      if (!logs[activeDay]) {
+        logs[activeDay] = {
+          date: activeDay,
+          tasks: createBlankTasks(activeDay),
+          notes: '',
+          failed: false,
+        };
+      }
+
+      return {
+        activeDay,
+        challengeStartDate,
+        logs,
+        history: Array.isArray(rawData.history) ? rawData.history : [],
+      };
+    }
+
+    function saveDataState(data) {
+      const payload = JSON.stringify(data);
+      localStorage.setItem(STORAGE_KEY, payload);
+      localStorage.setItem(BACKUP_KEY, JSON.stringify({ savedAt: new Date().toISOString(), data }));
+    }
+
     function loadData() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return defaultData();
-        const parsed = JSON.parse(raw);
-        const date = parsed.activeDay || todayString();
-        const logs = parsed.logs || {};
-        const existing = logs[date] || { date, tasks: createBlankTasks(date), notes: '', failed: false };
-        return {
-          activeDay: date,
-          challengeStartDate: parsed.challengeStartDate || date,
-          logs: {
-            ...logs,
-            [date]: {
-              ...existing,
-              tasks: normalizeTasksForDate(existing.tasks, date),
-            },
-          },
-          history: Array.isArray(parsed.history) ? parsed.history : [],
-        };
-      } catch (e) {
-        return defaultData();
-      }
+        const primaryRaw = localStorage.getItem(STORAGE_KEY);
+        if (primaryRaw) {
+          return sanitizeData(JSON.parse(primaryRaw));
+        }
+      } catch (e) {}
+
+      try {
+        const backupRaw = localStorage.getItem(BACKUP_KEY);
+        if (backupRaw) {
+          const parsedBackup = JSON.parse(backupRaw);
+          if (parsedBackup && parsedBackup.data) {
+            return sanitizeData(parsedBackup.data);
+          }
+        }
+      } catch (e) {}
+
+      return defaultData();
     }
 
     function isArrayComplete(arr) {
@@ -222,6 +264,65 @@
       });
     }
 
+    function runDiagnosticsSuite() {
+      const weekday = '2026-04-13';
+      const weekend = '2026-04-12';
+      const results = [];
+      const pass = (name, condition) => results.push({ name, ok: !!condition });
+
+      pass('Weekday work target is 8', workTarget(weekday) === 8);
+      pass('Weekend work target is 3', workTarget(weekend) === 3);
+
+      const blankWeekday = createBlankTasks(weekday);
+      pass('Blank tasks contain 8 work blocks', Array.isArray(blankWeekday.workHours) && blankWeekday.workHours.length === 8);
+      pass('Blank tasks contain 5 water blocks', Array.isArray(blankWeekday.water) && blankWeekday.water.length === 5);
+
+      const normalizedWeekend = normalizeTasksForDate({ workHours: [true, true, true] }, weekend);
+      pass('Weekend normalization still preserves 8 total work slots', normalizedWeekend.workHours.length === 8);
+      pass('Weekend work completion passes with first 3 checked', isTaskComplete('workHours', [true, true, true, false, false, false, false, false], weekend));
+      pass('Weekday work completion fails with only first 3 checked', !isTaskComplete('workHours', [true, true, true, false, false, false, false, false], weekday));
+
+      const workoutComplete = [
+        { done: true, outside: true },
+        { done: true, outside: false },
+      ];
+      pass('Workout completion requires both done plus one outside', isTaskComplete('workouts', workoutComplete, weekday));
+      pass('Workout completion fails if one workout missing', !isTaskComplete('workouts', [{ done: true, outside: true }, { done: false, outside: false }], weekday));
+
+      const completeLog = {
+        date: weekday,
+        failed: false,
+        tasks: {
+          ...createBlankTasks(weekday),
+          water: [true, true, true, true, true],
+          noCheatMeals: true,
+          noAlcohol: true,
+          reading: true,
+          progressPic: true,
+          language: true,
+          music: true,
+          coldShower: true,
+          callFriend: true,
+          callDad: true,
+          privateBoundary: true,
+          noMarijuana: true,
+          workouts: workoutComplete,
+          workoutsNotBackToBack: true,
+          workHours: [true, true, true, true, true, true, true, true],
+        },
+      };
+
+      pass('Completed log is detected as completed', isDayCompleted(completeLog));
+      pass('Sanitizer restores missing fields safely', !!sanitizeData({ activeDay: weekday, logs: { [weekday]: { date: weekday, tasks: {} } } }).logs[weekday]);
+      pass('Backup wrapper preserves nested data field', !!sanitizeData({ activeDay: weekday, challengeStartDate: weekday, logs: { [weekday]: completeLog } }).logs[weekday]);
+
+      const failedLog = { ...completeLog, failed: true };
+      pass('Failed log is never treated as completed', !isDayCompleted(failedLog));
+
+      const diagnosticsPassed = results.filter(r => r.ok).length;
+      const diagnosticsTotal = results.length;
+      return { diagnosticsPassed, diagnosticsTotal, results };
+    }
 
     function ActionBox({ checked, label, onClick }) {
       return (
@@ -265,7 +366,7 @@
           <div className="flex items-center justify-between gap-2 mb-1">
             <div>
               <div className="font-semibold text-[10px] leading-tight">Workout Tracking</div>
-              <div className="text-[8px] text-slate-500 leading-tight">2 x 2 grid</div>
+              <div className="text-[8px] text-slate-500 leading-tight">1 row with spacing toggle</div>
             </div>
             <div className="shrink-0 w-10">
               <ActionBox
@@ -275,21 +376,22 @@
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="grid grid-cols-[1fr_1fr_0.18fr_1fr_1fr] gap-1 items-stretch">
             <ActionBox
               checked={workouts[0].done}
               label="Workout 1"
               onClick={() => onToggleDone(0)}
             />
             <ActionBox
-              checked={workouts[1].done}
-              label="Workout 2"
-              onClick={() => onToggleDone(1)}
-            />
-            <ActionBox
               checked={workouts[0].outside}
               label="Out 1"
               onClick={() => onToggleOutside(0)}
+            />
+            <div></div>
+            <ActionBox
+              checked={workouts[1].done}
+              label="Workout 2"
+              onClick={() => onToggleDone(1)}
             />
             <ActionBox
               checked={workouts[1].outside}
@@ -313,9 +415,9 @@
         <div className="rounded-lg bg-white/90 border border-white p-1.5 shadow-sm">
           <div className="mb-1">
             <div className="font-semibold text-[10px] leading-tight">Daily Guardrails</div>
-            <div className="text-[8px] text-slate-500 leading-tight">2 x 2</div>
+            <div className="text-[8px] text-slate-500 leading-tight">1 x 4</div>
           </div>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="grid grid-cols-4 gap-1">
             {items.map(item => (
               <ActionBox
                 key={item.id}
@@ -373,19 +475,11 @@
       );
     }
 
-    function GroupCard({ group, children }) {
-      return (
-        <section className={`rounded-xl border p-1.5 shadow-sm ${group.color}`}>
-          <div className="mb-1">
-            <h2 className="text-[12px] font-bold leading-tight">{group.title}</h2>
-          </div>
-          <div className="space-y-1">{children}</div>
-        </section>
-      );
-    }
-
     function App() {
       const [data, setData] = useState(loadData);
+      const [diagnostics, setDiagnostics] = useState(null);
+      const [view, setView] = useState('dashboard');
+      const importInputRef = useRef(null);
       const activeDate = data.activeDay;
       const log = data.logs[activeDate] || { date: activeDate, tasks: createBlankTasks(activeDate), notes: '', failed: false };
       const tasks = useMemo(() => normalizeTasksForDate(log.tasks, activeDate), [log.tasks, activeDate]);
@@ -395,7 +489,7 @@
       const calendarDays = buildCalendarDays(data.challengeStartDate, data.logs);
 
       useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        saveDataState(data);
       }, [data]);
 
       function updateCurrentLog(updater) {
@@ -525,16 +619,63 @@
         const ok = window.confirm('Clear all local tracker data?');
         if (!ok) return;
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(BACKUP_KEY);
         setData(defaultData());
+        setDiagnostics(null);
       }
 
+      function exportBackup() {
+        const exportPayload = {
+          appName: APP_NAME,
+          exportVersion: EXPORT_VERSION,
+          exportedAt: new Date().toISOString(),
+          data,
+        };
+        const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `81-hard-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function promptImport() {
+        if (importInputRef.current) {
+          importInputRef.current.value = '';
+          importInputRef.current.click();
+        }
+      }
+
+      function handleImport(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(reader.result);
+            const importedData = sanitizeData(parsed.data ? parsed.data : parsed);
+            const ok = window.confirm('Import this backup and replace current local data?');
+            if (!ok) return;
+            setData(importedData);
+            setDiagnostics(null);
+          } catch (error) {
+            alert('Import failed: JSON file is invalid or not in the expected format.');
+          }
+        };
+        reader.readAsText(file);
+      }
+
+      function runDiagnostics() {
+        setDiagnostics(runDiagnosticsSuite());
+      }
 
       return (
         <div className="w-full min-h-screen bg-slate-100 p-1.5 space-y-1.5 overflow-y-auto">
           <header className="rounded-xl bg-slate-900 text-white p-2 shadow-sm">
             <div className="flex flex-col gap-1">
               <div>
-                <h1 className="text-[13px] font-bold tracking-tight">PRIVATE BOUNDARY BUILD</h1>
+                <h1 className="text-[13px] font-bold tracking-tight">81 Hard Tracker</h1>
                 <p className="text-[9px] text-slate-300 mt-0.5">Tiny portrait dashboard. Phone can scroll if needed.</p>
               </div>
               <div className="grid grid-cols-6 gap-1">
@@ -580,84 +721,116 @@
               </button>
               <button onClick={clearAll} className="rounded-md bg-slate-900 text-white px-2 py-1.5 text-[9px] font-semibold">Clear</button>
             </div>
-            <div className="mt-1 text-[9px] text-slate-600">
-              Layout: checklist on left, blocks on right
+            <div className="grid grid-cols-5 gap-1 mt-1">
+              <button onClick={() => setView('dashboard')} className={`rounded-md px-2 py-1.5 text-[9px] font-semibold ${view === 'dashboard' ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-900'}`}>Dashboard</button>
+              <button onClick={() => setView('calendar')} className={`rounded-md px-2 py-1.5 text-[9px] font-semibold ${view === 'calendar' ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-900'}`}>Calendar</button>
+              <button onClick={exportBackup} className="rounded-md bg-emerald-700 text-white px-2 py-1.5 text-[9px] font-semibold">Export JSON</button>
+              <button onClick={promptImport} className="rounded-md bg-violet-700 text-white px-2 py-1.5 text-[9px] font-semibold">Import JSON</button>
+              <button onClick={runDiagnostics} className="rounded-md bg-amber-600 text-white px-2 py-1.5 text-[9px] font-semibold">Run Tests</button>
             </div>
-          </section>
-
-          <main className="grid grid-cols-3 gap-1.5 items-start">
-            <section className="col-span-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
-              <div className="mb-1">
-                <h2 className="text-[11px] font-bold leading-tight">Daily Checklist</h2>
-                <p className="text-[8px] text-slate-500 leading-tight">7 rows</p>
-              </div>
-              <div className="space-y-1">
-                {GROUPS[0].items.map(item => (
-                  <SingleItem
-                    key={item.id}
-                    title={item.title}
-                    subtitle={item.subtitle || ''}
-                    checked={tasks[item.id]}
-                    onClick={() => toggleSingle(item.id)}
-                  />
-                ))}
-              </div>
-            </section>
-
-            <section className="col-span-2 grid grid-cols-1 gap-1.5">
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-1.5 shadow-sm">
-                <div className="mb-1">
-                  <h2 className="text-[11px] font-bold leading-tight">Hydration</h2>
-                </div>
-                <MultiBoxItem
-                  title="Water"
-                  boxes={5}
-                  boxLabel=".8L each"
-                  values={tasks.water}
-                  onToggle={(idx) => toggleArrayItem('water', idx)}
-                />
-              </div>
-
-              <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-1.5 shadow-sm">
-                <WorkBlocksGrid
-                  values={tasks.workHours}
-                  weekend={weekend}
-                  onToggle={(idx) => toggleArrayItem('workHours', idx)}
-                />
-              </div>
-
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-1.5 shadow-sm">
-                <GuardrailsGrid tasks={tasks} onToggle={toggleSingle} />
-              </div>
-
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-1.5 shadow-sm">
-                <WorkoutItem
-                  workouts={tasks.workouts}
-                  notBackToBack={tasks.workoutsNotBackToBack}
-                  onToggleDone={toggleWorkoutDone}
-                  onToggleOutside={toggleWorkoutOutside}
-                  onToggleNotBackToBack={() => toggleSingle('workoutsNotBackToBack')}
-                />
-              </div>
-
-              <section className="rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
-                <div className="mb-1">
-                  <h2 className="text-[11px] font-bold leading-tight">81-Day Calendar</h2>
-                  <p className="text-[8px] text-slate-500 leading-tight">Green = completed day number, red = failed day 0</p>
-                </div>
-                <div className="grid grid-cols-7 gap-1">
-                  {calendarDays.map(day => (
-                    <div key={day.date} className="rounded-md border border-slate-200 bg-slate-50 p-1">
-                      <div className="text-[6px] text-slate-500 leading-tight">{day.label}</div>
-                      <div className={`mt-0.5 rounded-sm px-0.5 py-1 text-center text-[7px] font-bold ${day.completed ? 'bg-green-600 text-white' : day.failed ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                        {day.completed ? day.number : day.failed ? 0 : day.number}
-                      </div>
+            <input ref={importInputRef} type="file" accept="application/json" className="hidden" onChange={handleImport} />
+            <div className="mt-1 text-[9px] text-slate-600">
+              Backups: local primary + local backup mirror + manual JSON export/import
+            </div>
+            {diagnostics ? (
+              <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-[8px] text-slate-700">
+                <div className="font-semibold">Diagnostics: {diagnostics.diagnosticsPassed}/{diagnostics.diagnosticsTotal} passed</div>
+                <div className="mt-1 grid grid-cols-2 gap-1">
+                  {diagnostics.results.map(result => (
+                    <div key={result.name} className={`rounded-sm px-1 py-1 ${result.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {result.ok ? 'PASS' : 'FAIL'} · {result.name}
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : null}
+          </section>
+
+          {view === 'dashboard' ? (
+            <main className="grid grid-cols-3 gap-1.5 items-start">
+              <section className="col-span-1 rounded-xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
+                <div className="mb-1">
+                  <h2 className="text-[11px] font-bold leading-tight">Daily Checklist</h2>
+                  <p className="text-[8px] text-slate-500 leading-tight">7 rows</p>
+                </div>
+                <div className="space-y-1">
+                  {GROUPS[0].items.map(item => (
+                    <SingleItem
+                      key={item.id}
+                      title={item.title}
+                      subtitle={item.subtitle || ''}
+                      checked={tasks[item.id]}
+                      onClick={() => toggleSingle(item.id)}
+                    />
+                  ))}
+                </div>
               </section>
+
+              <section className="col-span-2 grid grid-cols-1 gap-1.5">
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-1.5 shadow-sm">
+                  <div className="mb-1">
+                    <h2 className="text-[11px] font-bold leading-tight">Hydration</h2>
+                  </div>
+                  <MultiBoxItem
+                    title="Water"
+                    boxes={5}
+                    boxLabel=".8L each"
+                    values={tasks.water}
+                    onToggle={(idx) => toggleArrayItem('water', idx)}
+                  />
+                </div>
+
+                <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-1.5 shadow-sm">
+                  <WorkBlocksGrid
+                    values={tasks.workHours}
+                    weekend={weekend}
+                    onToggle={(idx) => toggleArrayItem('workHours', idx)}
+                  />
+                </div>
+
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-1.5 shadow-sm">
+                  <GuardrailsGrid tasks={tasks} onToggle={toggleSingle} />
+                </div>
+
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-1.5 shadow-sm">
+                  <WorkoutItem
+                    workouts={tasks.workouts}
+                    notBackToBack={tasks.workoutsNotBackToBack}
+                    onToggleDone={toggleWorkoutDone}
+                    onToggleOutside={toggleWorkoutOutside}
+                    onToggleNotBackToBack={() => toggleSingle('workoutsNotBackToBack')}
+                  />
+                </div>
+              </section>
+            </main>
+          ) : (
+            <section className="rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-[11px] font-bold leading-tight">81-Day Calendar</h2>
+                  <p className="text-[8px] text-slate-500 leading-tight">Green = completed day number, red = failed day 0</p>
+                </div>
+                <button onClick={() => setView('dashboard')} className="rounded-md bg-slate-900 text-white px-2 py-1.5 text-[9px] font-semibold">Back</button>
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map(day => (
+                  <button
+                    key={day.date}
+                    onClick={() => {
+                      setManualDate(day.date);
+                      setView('dashboard');
+                    }}
+                    className="rounded-md border border-slate-200 bg-slate-50 p-1 text-left"
+                  >
+                    <div className="text-[6px] text-slate-500 leading-tight">{day.label}</div>
+                    <div className={`mt-0.5 rounded-sm px-0.5 py-1 text-center text-[7px] font-bold ${day.completed ? 'bg-green-600 text-white' : day.failed ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                      {day.completed ? day.number : day.failed ? 0 : day.number}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </section>
-          </main>
+          )}
         </div>
       );
     }
